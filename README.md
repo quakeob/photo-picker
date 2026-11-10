@@ -34,6 +34,8 @@ The look is text-mode: SF Mono, tarnished cream on black, `[KEY]` buttons and bo
 | Z or double-click | Zoom to 100% and back |
 | ⌘R | Show picks in Finder |
 | ⌘E | Eject the card |
+| ⌘L | Browse Apple Photos |
+| ⌘O | Open a folder |
 | ⌘, | Settings |
 | ⌘/ | All shortcuts |
 
