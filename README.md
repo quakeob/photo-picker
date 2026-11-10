@@ -13,6 +13,7 @@ Photo Picker is a small native Mac app for going through a camera card fast. Plu
 The look is text-mode: SF Mono, tarnished cream on black, `[KEY]` buttons and box-drawing lines. That's only the chrome. Your photos and thumbnails are always shown as real images.
 
 - **Opens your card by itself.** Insert an SD card or connect your camera and it loads every photo in the order you shot them. You can also open any folder with ⌘O or by dropping it on the window.
+- **Works with Apple Photos too (⌘L).** Browse your Photos library, only Fujifilm shots by default (`DSCF` / `_DSF` files), and Space clones the original files to `~/Desktop/Fujifilm Picks`, named `2026-09-18_DSCF1141.JPG`. Your library is never changed.
 - **RAW + JPEG pairs count as one photo.** Picking `DSCF1141` copies both `DSCF1141.RAF` and `DSCF1141.JPG`, or only one of them if you choose that in Settings.
 - **Filmstrip** of every shot, with picked ones marked. Click a thumbnail to jump to it.
 - **Card map:** one line showing every shot on the card, with `■` for picks and `▲` for where you are. Click it to jump.
@@ -38,7 +39,7 @@ The look is text-mode: SF Mono, tarnished cream on black, `[KEY]` buttons and bo
 
 ## Where picks go
 
-`~/Pictures/Camera Picks/<today's date>/` by default. You can change the folder and turn off the per-day subfolder in Settings. Unpicking moves the copy to the Trash. If two different shots have the same name (cameras restart numbering in a new DCIM folder), the second is saved as `101_FUJI_DSCF0001.RAF` so nothing gets overwritten.
+From a card or folder: `~/Pictures/Camera Picks/<today's date>/` by default. From Apple Photos: `~/Desktop/Fujifilm Picks/`. You can change the folder and turn off the per-day subfolder in Settings. Unpicking moves the copy to the Trash. If two different shots have the same name (cameras restart numbering in a new DCIM folder), the second is saved as `101_FUJI_DSCF0001.RAF` so nothing gets overwritten.
 
 ## Install
 
@@ -50,7 +51,7 @@ cd photo-picker
 ./build.sh
 ```
 
-That builds `Photo Picker.app` and copies it into `~/Applications`. The app is ad-hoc signed, so the first time you open it you may need to right-click it and choose **Open**. The first time you plug in a card, macOS asks whether it can read removable volumes. Click **Allow**.
+That builds `Photo Picker.app` and copies it into `~/Applications`. The app is ad-hoc signed, so the first time you open it you may need to right-click it and choose **Open**. The first time you plug in a card, macOS asks whether it can read removable volumes, and the first time you open Apple Photos it asks for Photos access. Click **Allow** for both. If you have an Apple Development certificate, `build.sh` signs with it so macOS remembers those answers across rebuilds.
 
 ## Testing
 

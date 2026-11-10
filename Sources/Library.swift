@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import Photos
 
 enum CopyMode: String, CaseIterable, Identifiable {
     case both, jpegOnly, rawOnly
@@ -21,6 +22,15 @@ enum CopyMode: String, CaseIterable, Identifiable {
         let chosen = p.files.filter(pick)
         return chosen.isEmpty ? p.files : chosen   // a JPEG-only shot still copies its JPEG in RAW-only mode
     }
+    func resources(of p: Photo) -> [PHAssetResource] {
+        let chosen: [PHAssetResource]
+        switch self {
+        case .both: return p.resources
+        case .jpegOnly: chosen = p.resources.filter { !PhotosSource.isRaw($0) }
+        case .rawOnly: chosen = p.resources.filter(PhotosSource.isRaw)
+        }
+        return chosen.isEmpty ? p.resources : chosen
+    }
 }
 
 enum Prefs {
@@ -40,6 +50,15 @@ enum Prefs {
         return f.string(from: Date())
     }
     static var picksFolder: URL { daySubfolders ? picksBase.appendingPathComponent(today) : picksBase }
+
+    // Apple Photos source: one flat folder, Desktop by default.
+    static let defaultPhotosFolder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop/Fujifilm Picks")
+    static var photosPicksFolder: URL {
+        if let o = ProcessInfo.processInfo.environment["PHOTOPICKER_PICKS"] { return URL(fileURLWithPath: o).appendingPathComponent("photos") }
+        if let p = defaults.string(forKey: "photosPicksFolder"), !p.isEmpty { return URL(fileURLWithPath: p) }
+        return defaultPhotosFolder
+    }
+    static var photosFujifilmOnly: Bool { defaults.object(forKey: "photosFujifilmOnly") as? Bool ?? true }
 }
 
 /// Everything the window shows: the open card, the current photo, and what has been picked.
@@ -53,6 +72,7 @@ final class Library: ObservableObject {
     @Published private(set) var index = 0
     @Published private(set) var picked: Set<String> = []
     @Published private(set) var source: URL?
+    @Published private(set) var photosMode = false      // browsing the Apple Photos library
     @Published private(set) var pendingCopies = 0
     @Published private(set) var currentImage: NSImage?
     @Published private(set) var currentInfo: PhotoInfo?
@@ -89,6 +109,7 @@ final class Library: ObservableObject {
     var current: Photo? { photos.indices.contains(index) ? photos[index] : nil }
     var isCurrentPicked: Bool { current.map { picked.contains($0.id) } ?? false }
     var title: String {
+        if photosMode { return Prefs.photosFujifilmOnly ? "Apple Photos · Fujifilm" : "Apple Photos" }
         guard let source else { return "Photo Picker" }
         return volume(of: source).flatMap { $0.path == "/" ? nil : $0.lastPathComponent } ?? source.lastPathComponent
     }
@@ -98,7 +119,7 @@ final class Library: ObservableObject {
         return "\(n) photo\(n == 1 ? "" : "s") · \(picked.count) picked"
     }
     var canEject: Bool {
-        guard let source, let vol = volume(of: source), vol.path != "/" else { return false }
+        guard !photosMode, let source, let vol = volume(of: source), vol.path != "/" else { return false }
         let v = try? vol.resourceValues(forKeys: [.volumeIsEjectableKey, .volumeIsRemovableKey])
         return v?.volumeIsEjectable == true || v?.volumeIsRemovable == true
     }
@@ -134,6 +155,44 @@ final class Library: ObservableObject {
         } else if panel.runModal() == .OK, let u = panel.url { open(u) }
     }
 
+    /// Where picks from what's open right now are copied.
+    var picksFolder: URL { photosMode ? Prefs.photosPicksFolder : Prefs.picksFolder }
+
+    func openPhotosLibrary() {
+        PhotosSource.authorize { [weak self] ok in
+            guard let self else { return }
+            guard ok else {
+                self.alert = "Photo Picker doesn't have access to your Photos library. Turn it on in System Settings → Privacy & Security → Photos, then try again."
+                return
+            }
+            self.generation += 1
+            let gen = self.generation
+            self.resetContents()
+            self.lastMessage = nil
+            self.source = nil
+            self.photosMode = true
+            self.phase = .scanning("APPLE PHOTOS")
+            let fujiOnly = Prefs.photosFujifilmOnly, dest = Prefs.photosPicksFolder, mode = Prefs.copyMode
+            self.loadQueue.async {
+                let found = PhotosSource.scan(fujifilmOnly: fujiOnly) { done, total in
+                    DispatchQueue.main.async {
+                        guard gen == self.generation else { return }
+                        self.phase = .scanning("APPLE PHOTOS  \(Theme.pad(done, String(total).count))/\(total)")
+                    }
+                }
+                let already = Set(found.filter { Library.isPicked($0, in: dest, mode: mode) }.map(\.id))
+                DispatchQueue.main.async {
+                    guard gen == self.generation else { return }
+                    self.photos = found
+                    self.picked = already
+                    self.index = max(0, found.count - 1)       // newest shot first
+                    self.phase = found.isEmpty ? .noPhotos(fujiOnly ? "your Photos library (no Fujifilm shots)" : "your Photos library") : .ready
+                    self.showCurrent()
+                }
+            }
+        }
+    }
+
     func open(_ root: URL) {
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else { return }
@@ -141,6 +200,7 @@ final class Library: ObservableObject {
         let gen = generation
         resetContents()
         lastMessage = nil
+        photosMode = false
         source = root
         let name = title
         phase = .scanning(name)
@@ -163,6 +223,7 @@ final class Library: ObservableObject {
         generation += 1
         resetContents()
         source = nil
+        photosMode = false
         phase = .empty
     }
 
@@ -183,7 +244,7 @@ final class Library: ObservableObject {
     /// Re-check which photos are already in the picks folder (after Settings change).
     func refreshPicked() {
         guard phase == .ready else { return }
-        let all = photos, dest = Prefs.picksFolder, mode = Prefs.copyMode, gen = generation
+        let all = photos, dest = picksFolder, mode = Prefs.copyMode, gen = generation
         loadQueue.async {
             let already = Set(all.filter { Library.isPicked($0, in: dest, mode: mode) }.map(\.id))
             DispatchQueue.main.async { [weak self] in
@@ -262,8 +323,8 @@ final class Library: ObservableObject {
         inflight.insert(p.id)
         let gen = generation, px = previewPixels
         loadQueue.async {
-            let img = Imaging.image(p.display, maxPixel: px, minAcceptable: 1600)
-            let info = Imaging.info(p.display)
+            let img = Library.loadImage(p, maxPixel: px, minAcceptable: 1600)
+            let info = p.asset.map(PhotosSource.info) ?? p.display.map(Imaging.info) ?? PhotoInfo()
             DispatchQueue.main.async { [weak self] in
                 guard let self, gen == self.generation else { return }
                 self.inflight.remove(p.id)
@@ -283,7 +344,7 @@ final class Library: ObservableObject {
         let size = infos[p.id]?.pixelSize ?? CGSize(width: 9000, height: 9000)
         let px = Int(max(size.width, size.height)), gen = generation
         loadQueue.async {
-            guard let img = Imaging.image(p.display, maxPixel: px, minAcceptable: px) else { return }
+            guard let img = Library.loadImage(p, maxPixel: p.asset == nil ? px : nil, minAcceptable: px) else { return }
             DispatchQueue.main.async { [weak self] in
                 guard let self, gen == self.generation, self.current?.id == p.id else { return }
                 self.fullImage = (p.id, img)
@@ -295,19 +356,26 @@ final class Library: ObservableObject {
     func thumbnail(_ p: Photo) async -> NSImage? {
         let key = p.id as NSString
         if let t = thumbs.object(forKey: key) { return t }
-        let url = p.display, queue = thumbQueue
+        let queue = thumbQueue
         let img: NSImage? = await withCheckedContinuation { c in
-            queue.async { c.resume(returning: Imaging.image(url, maxPixel: 240, minAcceptable: 120)) }
+            queue.async { c.resume(returning: Library.loadImage(p, maxPixel: 240, minAcceptable: 120)) }
         }
         if let img { thumbs.setObject(img, forKey: key) }
         return img
+    }
+
+    /// Decodes a photo from a file or from Photos. nil maxPixel = full size (Photos only).
+    static func loadImage(_ p: Photo, maxPixel: Int?, minAcceptable: Int) -> NSImage? {
+        if let a = p.asset { return PhotosSource.image(a, maxPixel: maxPixel) }
+        guard let url = p.display else { return nil }
+        return Imaging.image(url, maxPixel: maxPixel ?? 20000, minAcceptable: minAcceptable)
     }
 
     // MARK: picking
 
     func togglePick() {
         guard let p = current else { return }
-        let dest = Prefs.picksFolder, mode = Prefs.copyMode
+        let dest = picksFolder, mode = Prefs.copyMode
         let adding = !picked.contains(p.id)
         if adding { picked.insert(p.id) } else { picked.remove(p.id) }
         if adding && Prefs.pickSound { NSSound(named: "Tink")?.play() }
@@ -317,7 +385,20 @@ final class Library: ObservableObject {
             var failure: String?
             do {
                 try fm.createDirectory(at: dest, withIntermediateDirectories: true)
-                if adding {
+                if adding, p.asset != nil {
+                    for r in mode.resources(of: p) {
+                        let target = dest.appendingPathComponent(PhotosSource.exportName(r, date: p.date))
+                        if SelfTest.active { print("  export \(r.originalFilename) -> \(target.lastPathComponent)") }
+                        if !fm.fileExists(atPath: target.path) { try PhotosSource.write(r, to: target, date: p.date) }
+                        if SelfTest.active { print("  wrote \(target.lastPathComponent): \((try? fm.attributesOfItem(atPath: target.path)[.size] as? NSNumber)??.intValue ?? -1) bytes") }
+                    }
+                } else if p.asset != nil {
+                    for r in p.resources {
+                        let target = dest.appendingPathComponent(PhotosSource.exportName(r, date: p.date))
+                        guard fm.fileExists(atPath: target.path) else { continue }
+                        if SelfTest.active { try fm.removeItem(at: target) } else { try fm.trashItem(at: target, resultingItemURL: nil) }
+                    }
+                } else if adding {
                     for f in mode.files(of: p) {
                         let target = Library.destination(for: f, in: dest)
                         if SelfTest.active { print("  copy \(f.lastPathComponent) -> \(target.url.lastPathComponent) exists=\(target.exists)") }
@@ -344,18 +425,23 @@ final class Library: ObservableObject {
     }
 
     func revealPicks() {
-        let dir = Prefs.picksFolder
+        let dir = picksFolder
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         NSWorkspace.shared.open(dir)
     }
 
     func revealOriginal() {
-        guard let p = current else { return }
+        guard let p = current, p.asset == nil else { return }
         NSWorkspace.shared.activateFileViewerSelecting(p.files)
     }
 
     static func isPicked(_ p: Photo, in dest: URL, mode: CopyMode) -> Bool {
-        mode.files(of: p).allSatisfy { destination(for: $0, in: dest).exists }
+        if p.asset != nil {
+            return mode.resources(of: p).allSatisfy {
+                FileManager.default.fileExists(atPath: dest.appendingPathComponent(PhotosSource.exportName($0, date: p.date)).path)
+            }
+        }
+        return mode.files(of: p).allSatisfy { destination(for: $0, in: dest).exists }
     }
 
     /// Cameras restart numbering per DCIM folder, so a clash with a *different* file gets the

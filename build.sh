@@ -34,6 +34,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>Made by Jake Davis.</string>
   <key>NSRemovableVolumesUsageDescription</key><string>Photo Picker reads photos from your camera card.</string>
+  <key>NSPhotoLibraryUsageDescription</key><string>Photo Picker shows your Photos library so you can copy the shots you pick into a folder.</string>
   <key>CFBundleDocumentTypes</key><array><dict>
     <key>CFBundleTypeName</key><string>Folder</string>
     <key>CFBundleTypeRole</key><string>Viewer</string>
@@ -42,7 +43,11 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   </dict></array>
 </dict></plist>
 PLIST
-codesign --force --sign - "$APP"
+# Sign with your Apple Development certificate if you have one (so macOS remembers the
+# Photos permission across rebuilds); otherwise ad-hoc.
+SIGN_ID="${SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/ {print $2; exit}')}"
+codesign --force --sign "${SIGN_ID:--}" "$APP"
+echo "Signed with: ${SIGN_ID:-ad-hoc}"
 mkdir -p ~/Applications
 rm -rf ~/Applications/"Photo Picker.app"
 cp -R "$APP" ~/Applications/

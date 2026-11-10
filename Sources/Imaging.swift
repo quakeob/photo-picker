@@ -1,5 +1,6 @@
 import AppKit
 import ImageIO
+import Photos
 
 let previewExts: Set<String> = ["jpg", "jpeg", "heic", "heif", "png", "tif", "tiff"]
 let rawExts: Set<String> = ["arw", "cr2", "cr3", "crw", "nef", "nrw", "raf", "orf", "rw2", "dng",
@@ -8,12 +9,19 @@ let photoExts = previewExts.union(rawExts)
 
 /// One shot on the card. A RAW + JPEG pair with the same name is one photo.
 struct Photo: Identifiable, Hashable {
-    let id: String            // path without extension
+    let id: String            // path without extension, or the Photos asset id
     var files: [URL]
-    var display: URL          // file decoded for the screen (JPEG preferred)
+    var display: URL?         // file decoded for the screen (JPEG preferred); nil for Photos assets
     var date: Date
-    var name: String { display.deletingPathExtension().lastPathComponent }
-    var kinds: String { files.map { $0.pathExtension.uppercased() }.sorted().joined(separator: " + ") }
+    var asset: PHAsset? = nil
+    var resources: [PHAssetResource] = []
+    var baseName: String? = nil
+
+    var name: String { baseName ?? display?.deletingPathExtension().lastPathComponent ?? "" }
+    var kinds: String {
+        let exts = asset == nil ? files.map(\.pathExtension) : resources.map { ($0.originalFilename as NSString).pathExtension }
+        return exts.map { $0.uppercased() }.sorted().joined(separator: " + ")
+    }
 }
 
 struct PhotoInfo {
@@ -41,7 +49,7 @@ enum Imaging {
             let date = v.creationDate ?? v.contentModificationDate ?? .distantPast
             if var p = groups[key] {
                 p.files.append(url)
-                if previewExts.contains(ext) && !previewExts.contains(p.display.pathExtension.lowercased()) { p.display = url }
+                if previewExts.contains(ext) && !previewExts.contains(p.display?.pathExtension.lowercased() ?? "") { p.display = url }
                 p.date = min(p.date, date)
                 groups[key] = p
             } else {
@@ -76,9 +84,13 @@ enum Imaging {
     }
 
     static func info(_ url: URL) -> PhotoInfo {
+        guard let src = source(url) else { return PhotoInfo() }
+        return info(src)
+    }
+
+    static func info(_ src: CGImageSource) -> PhotoInfo {
         var info = PhotoInfo()
-        guard let src = source(url),
-              let p = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else { return info }
+        guard let p = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else { return info }
         if let w = (p[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue,
            let h = (p[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue {
             let o = (p[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1

@@ -9,7 +9,7 @@ enum SelfTest {
     static func run(_ out: String) {
         let lib = Library.shared
         snap("0-launch", out, after: 2.0)
-        waitForReady(deadline: Date().addingTimeInterval(30)) {
+        waitForReady(deadline: Date().addingTimeInterval(ProcessInfo.processInfo.environment["PHOTOPICKER_SELFTEST_PHOTOS"] == "1" ? 300 : 30)) {
             let steps: [(String, () -> Void)] = [
                 ("space", key(49)), ("right", key(124)), ("right", key(124)), ("right", key(124)),
                 ("right", key(124)), ("space", key(49)), ("right", key(124)), ("right-at-end", key(124)),

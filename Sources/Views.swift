@@ -80,6 +80,7 @@ struct TopBar: View {
                 KeyButton(key: "SPACE", label: lib.isCurrentPicked ? "UNPICK" : "PICK", accent: lib.isCurrentPicked) { lib.togglePick() }
             } else {
                 KeyButton(key: "⌘O", label: "OPEN FOLDER") { lib.openPanel() }
+                KeyButton(key: "⌘L", label: "APPLE PHOTOS") { lib.openPhotosLibrary() }
             }
             KeyButton(key: "⌘R", label: "PICKS") { lib.revealPicks() }
             if lib.canEject { KeyButton(key: "⌘E", label: "EJECT") { lib.eject() } }
@@ -125,8 +126,11 @@ struct Stage: View {
                 }
             }
             if !busy {
-                KeyButton(key: "⌘O", label: "OPEN A FOLDER INSTEAD") { lib.openPanel() }
-                    .padding(.leading, 16)
+                VStack(alignment: .leading, spacing: 8) {
+                    KeyButton(key: "⌘L", label: "BROWSE APPLE PHOTOS") { lib.openPhotosLibrary() }
+                    KeyButton(key: "⌘O", label: "OPEN A FOLDER") { lib.openPanel() }
+                }
+                .padding(.leading, 16)
             }
         }
         .font(Theme.mono(13))
@@ -342,6 +346,7 @@ struct ShortcutsSheet: View {
         ("⌘R", "show picks in finder"),
         ("⌘E", "eject card"),
         ("⌘O", "open a folder"),
+        ("⌘L", "browse apple photos"),
         ("⌘,", "settings"),
     ]
 
@@ -375,8 +380,11 @@ struct SettingsView: View {
     @AppStorage("daySubfolders") private var daySubfolders = true
     @AppStorage("copyMode") private var copyMode = CopyMode.both.rawValue
     @AppStorage("pickSound") private var pickSound = false
+    @AppStorage("photosPicksFolder") private var photosPicksFolder = ""
+    @AppStorage("photosFujifilmOnly") private var photosFujifilmOnly = true
 
     private var baseURL: URL { picksBase.isEmpty ? Prefs.defaultBase : URL(fileURLWithPath: picksBase) }
+    private var photosURL: URL { photosPicksFolder.isEmpty ? Prefs.defaultPhotosFolder : URL(fileURLWithPath: photosPicksFolder) }
     private var example: String {
         let p = (daySubfolders ? baseURL.appendingPathComponent(Prefs.today) : baseURL).path
         return (p as NSString).abbreviatingWithTildeInPath
@@ -389,12 +397,28 @@ struct SettingsView: View {
                     HStack {
                         Text((baseURL.path as NSString).abbreviatingWithTildeInPath)
                             .lineLimit(1).truncationMode(.middle).foregroundStyle(Theme.dim)
-                        Button("Choose…", action: choose)
+                        Button("Choose…") { choose(baseURL) { picksBase = $0 } }
                     }
                 }
                 Toggle("A folder for each day", isOn: $daySubfolders)
+            } header: {
+                Text("Camera cards and folders")
             } footer: {
                 Text("> picks go to \(example)").foregroundStyle(Theme.dim)
+            }
+            Section {
+                LabeledContent("Picks folder") {
+                    HStack {
+                        Text((photosURL.path as NSString).abbreviatingWithTildeInPath)
+                            .lineLimit(1).truncationMode(.middle).foregroundStyle(Theme.dim)
+                        Button("Choose…") { choose(photosURL) { photosPicksFolder = $0 } }
+                    }
+                }
+                Toggle("Only Fujifilm shots (DSCF / _DSF files)", isOn: $photosFujifilmOnly)
+            } header: {
+                Text("Apple Photos")
+            } footer: {
+                Text("> originals are cloned as 2026-09-18_DSCF1141.RAF / .JPG. your library is never changed.").foregroundStyle(Theme.dim)
             }
             Section {
                 Picker("RAW + JPEG shots: copy", selection: $copyMode) {
@@ -415,16 +439,18 @@ struct SettingsView: View {
         .onChange(of: picksBase) { lib.refreshPicked() }
         .onChange(of: daySubfolders) { lib.refreshPicked() }
         .onChange(of: copyMode) { lib.refreshPicked() }
+        .onChange(of: photosPicksFolder) { lib.refreshPicked() }
+        .onChange(of: photosFujifilmOnly) { if lib.photosMode { lib.openPhotosLibrary() } }
     }
 
-    private func choose() {
+    private func choose(_ start: URL, _ set: (String) -> Void) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Use Folder"
-        panel.directoryURL = baseURL
-        if panel.runModal() == .OK, let u = panel.url { picksBase = u.path }
+        panel.directoryURL = FileManager.default.fileExists(atPath: start.path) ? start : start.deletingLastPathComponent()
+        if panel.runModal() == .OK, let u = panel.url { set(u.path) }
     }
 }
 

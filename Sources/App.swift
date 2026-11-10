@@ -25,11 +25,13 @@ struct AppCommands: Commands {
             Button("Open Folder…") { lib.openPanel() }.keyboardShortcut("o")
             Button("Open Camera Card") { lib.openCardIfPresent() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
+            Button("Open Apple Photos Library") { lib.openPhotosLibrary() }
+                .keyboardShortcut("l")
             Divider()
             Button("Show Picks in Finder") { lib.revealPicks() }.keyboardShortcut("r")
             Button("Show Original in Finder") { lib.revealOriginal() }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(lib.current == nil)
+                .disabled(lib.current == nil || lib.photosMode)
             Divider()
             Button("Eject Card") { lib.eject() }.keyboardShortcut("e").disabled(!lib.canEject)
         }
@@ -91,7 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showMainWindow()
         NSApp.activate(ignoringOtherApps: true)
         let lib = Library.shared
-        if lib.phase == .empty {
+        if ProcessInfo.processInfo.environment["PHOTOPICKER_SELFTEST_PHOTOS"] == "1" {
+            lib.openPhotosLibrary()
+        } else if lib.phase == .empty {
             if let arg = CommandLine.arguments.dropFirst().first(where: { !$0.hasPrefix("-") }),
                FileManager.default.fileExists(atPath: arg) {
                 lib.open(URL(fileURLWithPath: arg))
