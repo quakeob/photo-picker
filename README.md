@@ -4,6 +4,8 @@
 
 I was too lazy to find and download an app for this, so I made my own.
 
+> this build was done under 30 min dont expect anything more from it and i prob wont update it
+
 Photo Picker is a small native Mac app for going through a camera card fast. Plug in the card, flip through with the arrow keys, and press **Space** on the shots you want. Each pick is copied into a folder. It never changes anything on the card.
 
 ## What it does
