@@ -10,7 +10,7 @@ struct PhotoPickerApp: App {
     // launched by dropping a folder on it), so the only scene here is Settings.
     var body: some Scene {
         Settings {
-            SettingsView().environmentObject(lib)
+            SettingsView().environmentObject(lib).preferredColorScheme(.dark)
         }
         .commands { AppCommands(lib: lib) }
     }
@@ -67,11 +67,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showMainWindow() {
         if let window { window.makeKeyAndOrderFront(nil); return }
         let host = NSHostingController(rootView: ContentView().environmentObject(Library.shared).preferredColorScheme(.dark))
-        host.sceneBridgingOptions = [.toolbars, .title]
+        host.sceneBridgingOptions = []
         host.sizingOptions = [.minSize]
         let w = NSWindow(contentViewController: host)
-        w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        w.toolbarStyle = .unified
+        w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        w.titlebarAppearsTransparent = true
+        w.titleVisibility = .hidden
+        w.isMovableByWindowBackground = true
+        w.backgroundColor = Theme.nsBG
         w.appearance = NSAppearance(named: .darkAqua)
         w.collectionBehavior.insert(.fullScreenPrimary)
         w.isReleasedWhenClosed = false

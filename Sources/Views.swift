@@ -1,47 +1,45 @@
 import SwiftUI
 import AppKit
 
-let pickGreen = Color(red: 0.30, green: 0.82, blue: 0.42)
-
 struct ContentView: View {
     @EnvironmentObject var lib: Library
     @AppStorage("showFilmstrip") private var showFilmstrip = true
 
     var body: some View {
-        Group {
-            switch lib.phase {
-            case .empty:
-                EmptyState(title: "No Camera Connected", symbol: "sdcard",
-                           message: lib.lastMessage ?? "Insert a memory card or connect your camera. Photo Picker opens it as soon as it shows up.")
-            case .scanning(let name):
-                VStack(spacing: 12) {
-                    ProgressView().controlSize(.large)
-                    Text("Reading \(name)…").foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .noPhotos(let name):
-                EmptyState(title: "No Photos", symbol: "photo.on.rectangle.angled",
-                           message: "\(name) doesn't contain any photos Photo Picker can read.")
-            case .ready:
-                VStack(spacing: 0) {
-                    ZStack(alignment: .topTrailing) {
-                        PhotoCanvas(lib: lib)
-                        if lib.currentImage == nil { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
-                        if lib.isCurrentPicked { PickedBadge().padding(14).transition(.scale(scale: 0.6).combined(with: .opacity)) }
-                        if lib.zoomed { ZoomHint().padding(14).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading) }
+        VStack(spacing: 0) {
+            TopBar()
+            Rule()
+            Group {
+                switch lib.phase {
+                case .empty:
+                    Stage(lines: lib.lastMessage.map { [$0.uppercased(), "WAITING FOR A CARD"] }
+                          ?? ["NO CARD", "INSERT A MEMORY CARD OR CONNECT YOUR CAMERA"])
+                case .scanning(let name):
+                    Stage(lines: ["READING \(name.uppercased())"], busy: true)
+                case .noPhotos(let name):
+                    Stage(lines: ["NO PHOTOS IN \(name.uppercased())", "TRY ANOTHER FOLDER"])
+                case .ready:
+                    VStack(spacing: 0) {
+                        Viewer()
+                        Rule()
+                        InfoBar()
+                        CardMap()
+                        if showFilmstrip {
+                            Rule()
+                            Filmstrip()
+                        }
                     }
-                    .animation(.spring(response: 0.22, dampingFraction: 0.7), value: lib.isCurrentPicked)
-                    InfoBar()
-                    if showFilmstrip { Filmstrip() }
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 640, minHeight: 440)
-        .background(Color(nsColor: ZoomView.canvas))
+        .font(Theme.mono(12))
+        .foregroundStyle(Theme.text)
+        .background(Theme.bg)
+        .ignoresSafeArea()
+        .frame(minWidth: 700, minHeight: 460)
         .background(WindowAccessor { lib.window = $0 })
-        .navigationTitle(lib.title)
-        .navigationSubtitle(lib.subtitle)
-        .toolbar { MainToolbar() }
+        .onChange(of: lib.title, initial: true) { _, t in lib.window?.title = t }
         .dropDestination(for: URL.self) { urls, _ in
             guard let dir = urls.first(where: { $0.hasDirectoryPath }) else { return false }
             lib.open(dir)
@@ -54,190 +52,322 @@ struct ContentView: View {
     }
 }
 
-struct EmptyState: View {
+// MARK: top bar
+
+struct TopBar: View {
     @EnvironmentObject var lib: Library
-    let title: String, symbol: String, message: String
     var body: some View {
-        ContentUnavailableView {
-            Label(title, systemImage: symbol)
-        } description: {
-            Text(message)
-        } actions: {
-            Button("Open Folder…") { lib.openPanel() }
-                .keyboardShortcut(.defaultAction)
+        HStack(spacing: 18) {
+            HStack(spacing: 0) {
+                Text("PHOTO PICKER").foregroundStyle(Theme.dim)
+                if lib.phase == .ready || lib.source != nil {
+                    Text("  /  ").foregroundStyle(Theme.faint)
+                    Text(lib.title.uppercased()).foregroundStyle(Theme.bright)
+                }
+                if lib.phase == .ready {
+                    Text("  /  ").foregroundStyle(Theme.faint)
+                    Text("\(Theme.pad(lib.photos.count)) SHOTS").foregroundStyle(Theme.dim)
+                    Text("  ").foregroundStyle(Theme.faint)
+                    Text("\(Theme.pad(lib.picked.count)) PICKED").foregroundStyle(lib.picked.isEmpty ? Theme.dim : Theme.brass)
+                }
+            }
+            .lineLimit(1)
+            Spacer(minLength: 12)
+            if lib.pendingCopies > 0 {
+                HStack(spacing: 6) { Text("COPYING"); Spinner() }.foregroundStyle(Theme.brass)
+            }
+            if lib.phase == .ready {
+                KeyButton(key: "SPACE", label: lib.isCurrentPicked ? "UNPICK" : "PICK", accent: lib.isCurrentPicked) { lib.togglePick() }
+            } else {
+                KeyButton(key: "⌘O", label: "OPEN FOLDER") { lib.openPanel() }
+            }
+            KeyButton(key: "⌘R", label: "PICKS") { lib.revealPicks() }
+            if lib.canEject { KeyButton(key: "⌘E", label: "EJECT") { lib.eject() } }
+            KeyButton(key: "?", label: "KEYS") { lib.showShortcuts = true }
         }
+        .font(Theme.mono(11.5))
+        .padding(.leading, 84)      // clear of the window buttons
+        .padding(.trailing, 16)
+        .frame(height: 38)
+    }
+}
+
+// MARK: empty / loading
+
+struct Stage: View {
+    @EnvironmentObject var lib: Library
+    let lines: [String]
+    var busy = false
+
+    private let card = """
+     _____________
+    |  ▌▌▌▌▌▌▌▌   \\
+    |              |
+    |              |
+    |      SD      |
+    |              |
+    |______________|
+    """
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text(card).foregroundStyle(busy ? Theme.text : Theme.dim).fixedSize()
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
+                    HStack(spacing: 0) {
+                        Text("> ").foregroundStyle(Theme.faint)
+                        Text(line).foregroundStyle(i == 0 ? Theme.bright : Theme.dim)
+                        if i == lines.count - 1 {
+                            Text(" ")
+                            if busy { Spinner().foregroundStyle(Theme.brass) } else { Cursor().foregroundStyle(Theme.text) }
+                        }
+                    }
+                }
+            }
+            if !busy {
+                KeyButton(key: "⌘O", label: "OPEN A FOLDER INSTEAD") { lib.openPanel() }
+                    .padding(.leading, 16)
+            }
+        }
+        .font(Theme.mono(13))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-struct PickedBadge: View {
+// MARK: viewer
+
+struct Viewer: View {
+    @EnvironmentObject var lib: Library
     var body: some View {
-        Label("Picked", systemImage: "checkmark")
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.black)
-            .padding(.horizontal, 11)
-            .padding(.vertical, 6)
-            .background(pickGreen, in: Capsule())
-            .shadow(color: .black.opacity(0.35), radius: 6, y: 2)
+        ZStack {
+            PhotoCanvas(lib: lib)
+            if lib.currentImage == nil {
+                HStack(spacing: 8) { Text("LOADING"); Spinner() }.foregroundStyle(Theme.dim)
+            }
+            Viewfinder().allowsHitTesting(false)
+        }
+        .overlay(alignment: .topTrailing) {
+            if lib.isCurrentPicked {
+                Text(" ■ PICKED ")
+                    .font(Theme.mono(12, .semibold))
+                    .foregroundStyle(Theme.bg)
+                    .padding(.vertical, 3)
+                    .background(Theme.brass)
+                    .padding(20)
+                    .transition(.opacity)
+            }
+        }
+        .overlay(alignment: .bottomLeading) {
+            if lib.zoomed {
+                Text("ZOOM 1:1  ·  DRAG TO PAN  ·  [Z] FIT")
+                    .font(Theme.mono(11))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Theme.bg.opacity(0.85))
+                    .padding(20)
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: lib.isCurrentPicked)
     }
 }
 
-struct ZoomHint: View {
+/// Corner marks around the frame, like a viewfinder.
+struct Viewfinder: View {
     var body: some View {
-        Text("100%  ·  drag to look around  ·  Z or Esc to fit")
-            .font(.caption)
-            .foregroundStyle(.white.opacity(0.85))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(.black.opacity(0.55), in: Capsule())
+        let c = Theme.faint
+        VStack {
+            HStack { Text("┌─"); Spacer(); Text("─┐") }
+            Spacer()
+            HStack { Text("└─"); Spacer(); Text("─┘") }
+        }
+        .font(Theme.mono(13))
+        .foregroundStyle(c)
+        .padding(8)
     }
 }
+
+// MARK: info + card map
 
 struct InfoBar: View {
     @EnvironmentObject var lib: Library
     private static let dateFormat: DateFormatter = {
         let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .short
+        f.dateFormat = "yyyy-MM-dd HH:mm"
         return f
     }()
 
     var body: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 0) {
             if let p = lib.current {
-                HStack(spacing: 8) {
-                    Text(p.name).fontWeight(.medium).foregroundStyle(.primary)
-                    Text(p.kinds).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .overlay(RoundedRectangle(cornerRadius: 3).stroke(.secondary.opacity(0.5)))
-                }
-                if let ex = lib.currentInfo?.exposure { Text(ex) }
-                if let cam = lib.currentInfo?.camera { Text(cam).lineLimit(1) }
-                Spacer(minLength: 8)
-                if let d = lib.currentInfo?.captured ?? Optional(p.date) { Text(Self.dateFormat.string(from: d)) }
-                Text("\(lib.index + 1) of \(lib.photos.count)").monospacedDigit().foregroundStyle(.primary)
+                Text(p.name).foregroundStyle(Theme.bright)
+                Text("  \(p.kinds.replacingOccurrences(of: " + ", with: "+"))").foregroundStyle(Theme.dim)
+                sep
+                if let ex = lib.currentInfo?.exposure { Text(ex); sep }
+                if let cam = lib.currentInfo?.camera { Text(cam.uppercased()).foregroundStyle(Theme.dim) }
+                Spacer(minLength: 12)
+                Text(Self.dateFormat.string(from: lib.currentInfo?.captured ?? p.date)).foregroundStyle(Theme.dim)
+                sep
+                Text("\(Theme.pad(lib.index + 1))/\(Theme.pad(lib.photos.count))").foregroundStyle(Theme.bright)
             }
         }
-        .font(.callout)
-        .foregroundStyle(.secondary)
+        .font(Theme.mono(11.5))
         .lineLimit(1)
         .padding(.horizontal, 16)
-        .frame(height: 34)
-        .background(Color(white: 0.135))
-        .overlay(alignment: .top) { Divider() }
+        .frame(height: 28)
+    }
+
+    private var sep: some View { Text("  │  ").foregroundStyle(Theme.faint) }
+}
+
+/// The whole card on one line: · shot, ■ picked, ▲ where you are. Click to jump.
+struct CardMap: View {
+    @EnvironmentObject var lib: Library
+    var body: some View {
+        GeometryReader { geo in
+            let cw = Theme.advance(11)
+            let cols = max(8, Int(geo.size.width / cw) - 1)
+            Text(line(cols))
+                .font(Theme.mono(11))
+                .lineLimit(1)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture { loc in
+                    let n = lib.photos.count, c = Int(loc.x / cw)
+                    let i = n <= cols ? Int((Double(c) * Double(n - 1) / Double(max(cols - 1, 1))).rounded()) : c * n / cols
+                    lib.go(to: min(max(i, 0), lib.photos.count - 1))
+                }
+        }
+        .frame(height: 16)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+        .help("Every shot on the card. ■ picked, ▲ current. Click to jump.")
+    }
+
+    private func picked(_ a: Int, _ b: Int) -> Bool {
+        (a..<min(b, lib.photos.count)).contains { lib.picked.contains(lib.photos[$0].id) }
+    }
+
+    private func line(_ cols: Int) -> AttributedString {
+        var out = AttributedString()
+        let n = lib.photos.count
+        guard n > 0 else { return out }
+        func glyph(_ ch: String, _ color: Color) { var s = AttributedString(ch); s.foregroundColor = color; out += s }
+        if n <= cols {
+            // one mark per shot, evenly spaced
+            var slots = [Int?](repeating: nil, count: cols)
+            for i in 0..<n { slots[n == 1 ? 0 : i * (cols - 1) / (n - 1)] = i }
+            for slot in slots {
+                guard let i = slot else { glyph(" ", Theme.faint); continue }
+                if i == lib.index { glyph("▲", Theme.bright) }
+                else if lib.picked.contains(lib.photos[i].id) { glyph("■", Theme.brass) }
+                else { glyph("·", Theme.dim) }
+            }
+        } else {
+            // each character covers several shots
+            for c in 0..<cols {
+                let a = c * n / cols, b = max(a + 1, (c + 1) * n / cols)
+                if (a..<b).contains(lib.index) { glyph("▲", Theme.bright) }
+                else if picked(a, b) { glyph("■", Theme.brass) }
+                else { glyph("·", Theme.faint) }
+            }
+        }
+        return out
     }
 }
+
+// MARK: filmstrip
 
 struct Filmstrip: View {
     @EnvironmentObject var lib: Library
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: 6) {
+                LazyHStack(spacing: 18) {
                     ForEach(Array(lib.photos.enumerated()), id: \.element.id) { i, p in
                         Thumb(photo: p, selected: i == lib.index, picked: lib.picked.contains(p.id))
                             .id(p.id)
                             .onTapGesture { lib.go(to: i) }
                     }
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 10)
             }
             .onChange(of: lib.index) { _, _ in
                 guard let id = lib.current?.id else { return }
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(id, anchor: .center) }
+                withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(id, anchor: .center) }
             }
             .onAppear { if let id = lib.current?.id { proxy.scrollTo(id, anchor: .center) } }
         }
-        .frame(height: 86)
-        .background(Color(white: 0.09))
-        .overlay(alignment: .top) { Divider() }
+        .frame(height: 104)
     }
 }
 
+/// A real thumbnail; the theme only touches its frame and label.
 struct Thumb: View {
     @EnvironmentObject var lib: Library
     let photo: Photo, selected: Bool, picked: Bool
     @State private var image: NSImage?
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
+        VStack(alignment: .leading, spacing: 5) {
             Group {
-                if let image { Image(nsImage: image).resizable().scaledToFill() } else { Color(white: 0.16) }
+                if let image { Image(nsImage: image).resizable().scaledToFill() } else { Theme.raised }
             }
             .frame(width: 96, height: 64)
             .clipped()
-            .opacity(selected ? 1 : 0.72)
-            if picked {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 15, weight: .bold))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(.black, pickGreen)
-                    .padding(3)
+            .opacity(selected ? 1 : 0.6)
+            .overlay(Rectangle().stroke(selected ? Theme.bright : (picked ? Theme.brass : Theme.faint), lineWidth: 1))
+            HStack(spacing: 0) {
+                Text(selected ? "▸" : " ").foregroundStyle(Theme.bright)
+                Text(picked ? "■" : " ").foregroundStyle(Theme.brass)
+                Text(" \(photo.name)").foregroundStyle(selected ? Theme.bright : Theme.dim)
             }
+            .font(Theme.mono(10))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).stroke(selected ? Color.white : (picked ? pickGreen.opacity(0.8) : .clear),
-                                                          lineWidth: selected ? 2 : 1.5))
         .contentShape(Rectangle())
         .task(id: photo.id) { image = await lib.thumbnail(photo) }
     }
 }
 
-struct MainToolbar: ToolbarContent {
-    @EnvironmentObject var lib: Library
-    var body: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            if lib.pendingCopies > 0 {
-                ProgressView().controlSize(.small).help("Copying picks…")
-            }
-            Button { lib.togglePick() } label: {
-                Label(lib.isCurrentPicked ? "Unpick" : "Pick",
-                      systemImage: lib.isCurrentPicked ? "checkmark.circle.fill" : "checkmark.circle")
-            }
-            .help(lib.isCurrentPicked ? "Remove from picks (Space)" : "Copy to picks (Space)")
-            .disabled(lib.current == nil)
-            Button { lib.revealPicks() } label: { Label("Show Picks", systemImage: "folder") }
-                .help("Show the picks folder in Finder (⌘R)")
-            if lib.canEject {
-                Button { lib.eject() } label: { Label("Eject", systemImage: "eject") }
-                    .help("Eject the card (⌘E)")
-            }
-        }
-    }
-}
+// MARK: shortcuts
 
 struct ShortcutsSheet: View {
     @Environment(\.dismiss) private var dismiss
     private let rows: [(String, String)] = [
-        ("← →", "Previous / next photo"),
-        ("⇧ ← →", "Jump 10 photos"),
-        ("Home  End", "First / last photo"),
-        ("Space", "Pick, or unpick, the photo"),
-        ("⌥ ← →", "Previous / next picked photo"),
-        ("Z  or double-click", "Zoom to 100% and back"),
-        ("Pinch", "Zoom in and out"),
-        ("⌘R", "Show picks in Finder"),
-        ("⌘E", "Eject the card"),
-        ("⌘O", "Open a folder"),
+        ("← →", "previous / next photo"),
+        ("⇧ ← →", "jump 10 photos"),
+        ("home  end", "first / last photo"),
+        ("space", "pick / unpick"),
+        ("⌥ ← →", "previous / next pick"),
+        ("z  dbl-click", "zoom 1:1 and back"),
+        ("⌘R", "show picks in finder"),
+        ("⌘E", "eject card"),
+        ("⌘O", "open a folder"),
+        ("⌘,", "settings"),
     ]
+
+    private var table: String {
+        let k = 14, v = 26
+        func row(_ a: String, _ b: String) -> String {
+            "│ " + a.padding(toLength: k, withPad: " ", startingAt: 0) + " │ " + b.padding(toLength: v, withPad: " ", startingAt: 0) + " │"
+        }
+        let top = "┌" + String(repeating: "─", count: k + 2) + "┬" + String(repeating: "─", count: v + 2) + "┐"
+        let mid = "├" + String(repeating: "─", count: k + 2) + "┼" + String(repeating: "─", count: v + 2) + "┤"
+        let bot = "└" + String(repeating: "─", count: k + 2) + "┴" + String(repeating: "─", count: v + 2) + "┘"
+        return ([top, row("KEY", "ACTION"), mid] + rows.map { row($0.0, $0.1) } + [bot]).joined(separator: "\n")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Keyboard Shortcuts").font(.title3.weight(.semibold))
-            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
-                ForEach(rows, id: \.0) { k, v in
-                    GridRow {
-                        Text(k).font(.system(.body, design: .rounded).weight(.medium)).gridColumnAlignment(.trailing)
-                        Text(v).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
+            Text(table).font(Theme.mono(12)).foregroundStyle(Theme.text).fixedSize()
+            HStack { Spacer(); KeyButton(key: "esc", label: "CLOSE") { dismiss() } }
         }
-        .padding(24)
-        .frame(width: 420)
+        .padding(22)
+        .background(Theme.bg)
+        .onExitCommand { dismiss() }
     }
 }
+
+// MARK: settings
 
 struct SettingsView: View {
     @EnvironmentObject var lib: Library
@@ -258,26 +388,29 @@ struct SettingsView: View {
                 LabeledContent("Picks folder") {
                     HStack {
                         Text((baseURL.path as NSString).abbreviatingWithTildeInPath)
-                            .lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.middle).foregroundStyle(Theme.dim)
                         Button("Choose…", action: choose)
                     }
                 }
-                Toggle("Put each day's picks in their own folder", isOn: $daySubfolders)
+                Toggle("A folder for each day", isOn: $daySubfolders)
             } footer: {
-                Text("Picks are copied to \(example)").font(.caption).foregroundStyle(.secondary)
+                Text("> picks go to \(example)").foregroundStyle(Theme.dim)
             }
             Section {
-                Picker("For RAW + JPEG shots, copy", selection: $copyMode) {
+                Picker("RAW + JPEG shots: copy", selection: $copyMode) {
                     ForEach(CopyMode.allCases) { Text($0.label).tag($0.rawValue) }
                 }
-                Toggle("Play a sound when you pick a photo", isOn: $pickSound)
+                Toggle("Sound when picking", isOn: $pickSound)
             } footer: {
-                Text("Originals on the card are never changed. Unpicking moves the copy to the Trash.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("> the card is never changed. unpicking moves the copy to the trash.").foregroundStyle(Theme.dim)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 500)
+        .font(Theme.mono(12))
+        .tint(Theme.brass)
+        .scrollContentBackground(.hidden)
+        .background(Theme.bg)
+        .frame(width: 520)
         .fixedSize(horizontal: false, vertical: true)
         .onChange(of: picksBase) { lib.refreshPicked() }
         .onChange(of: daySubfolders) { lib.refreshPicked() }

@@ -1,5 +1,6 @@
-// Draws the 1024px app icon: a graphite tile, a loose stack of prints, the top one
-// pulled forward with the green pick mark. Usage: swift make-icon.swift out.png
+// Draws the 1024px app icon in the app's text-mode theme: a near-black tile, an ASCII
+// landscape in tarnished cream inside viewfinder corners, and the brass pick tag.
+// Usage: swift make-icon.swift out.png
 import AppKit
 
 let size: CGFloat = 1024
@@ -11,74 +12,55 @@ NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
 let ctx = NSGraphicsContext.current!.cgContext
 
-func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> CGColor { CGColor(red: r / 255, green: g / 255, blue: b / 255, alpha: a) }
+func color(_ hex: UInt32, _ a: CGFloat = 1) -> NSColor {
+    NSColor(srgbRed: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255, blue: CGFloat(hex & 0xff) / 255, alpha: a)
+}
 
-// Tile (Big Sur grid: 824px squircle-ish rounded rect with a soft drop shadow)
+// Tile
 let tile = CGRect(x: 100, y: 100, width: 824, height: 824)
 let tilePath = CGPath(roundedRect: tile, cornerWidth: 185, cornerHeight: 185, transform: nil)
 ctx.saveGState()
-ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: rgb(0, 0, 0, 0.35))
-ctx.addPath(tilePath); ctx.setFillColor(rgb(36, 38, 42)); ctx.fillPath()
+ctx.setShadow(offset: CGSize(width: 0, height: -10), blur: 28, color: color(0x000000, 0.4).cgColor)
+ctx.addPath(tilePath); ctx.setFillColor(color(0x0d0d0c).cgColor); ctx.fillPath()
 ctx.restoreGState()
-ctx.saveGState()
-ctx.addPath(tilePath); ctx.clip()
-let shade = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [rgb(52, 55, 60), rgb(28, 30, 33)] as CFArray, locations: [0, 1])!
-ctx.drawLinearGradient(shade, start: CGPoint(x: 0, y: tile.maxY), end: CGPoint(x: 0, y: tile.minY), options: [])
-ctx.restoreGState()
+ctx.addPath(tilePath); ctx.setStrokeColor(color(0x2a2824).cgColor); ctx.setLineWidth(3); ctx.strokePath()
 
-// A print: white border, a quiet landscape inside
-func print(center: CGPoint, angle: CGFloat, tone: CGFloat, scene: Bool) {
-    let w: CGFloat = 470, h: CGFloat = 340, border: CGFloat = 22
-    ctx.saveGState()
-    ctx.translateBy(x: center.x, y: center.y)
-    ctx.rotate(by: angle * .pi / 180)
-    let r = CGRect(x: -w / 2, y: -h / 2, width: w, height: h)
-    ctx.setShadow(offset: CGSize(width: 0, height: -8), blur: 22, color: rgb(0, 0, 0, 0.45))
-    ctx.setFillColor(rgb(245 * tone, 243 * tone, 238 * tone))
-    ctx.addPath(CGPath(roundedRect: r, cornerWidth: 10, cornerHeight: 10, transform: nil)); ctx.fillPath()
-    ctx.setShadow(offset: .zero, blur: 0, color: nil)
-    let inner = r.insetBy(dx: border, dy: border)
-    ctx.clip(to: inner)
-    if scene {
-        let sky = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                             colors: [rgb(126, 150, 172), rgb(204, 196, 178)] as CFArray, locations: [0, 1])!
-        ctx.drawLinearGradient(sky, start: CGPoint(x: 0, y: inner.maxY), end: CGPoint(x: 0, y: inner.minY + 90), options: [.drawsAfterEndLocation])
-        ctx.setFillColor(rgb(232, 214, 176)); ctx.fillEllipse(in: CGRect(x: inner.minX + 290, y: inner.minY + 150, width: 58, height: 58))
-        let far = CGMutablePath()
-        far.move(to: CGPoint(x: inner.minX, y: inner.minY + 110))
-        far.addLine(to: CGPoint(x: inner.minX + 110, y: inner.minY + 200))
-        far.addLine(to: CGPoint(x: inner.minX + 190, y: inner.minY + 150))
-        far.addLine(to: CGPoint(x: inner.minX + 300, y: inner.minY + 230))
-        far.addLine(to: CGPoint(x: inner.maxX, y: inner.minY + 120))
-        far.addLine(to: CGPoint(x: inner.maxX, y: inner.minY)); far.addLine(to: CGPoint(x: inner.minX, y: inner.minY))
-        ctx.addPath(far); ctx.setFillColor(rgb(84, 98, 110)); ctx.fillPath()
-        let near = CGMutablePath()
-        near.move(to: CGPoint(x: inner.minX, y: inner.minY + 70))
-        near.addCurve(to: CGPoint(x: inner.maxX, y: inner.minY + 60), control1: CGPoint(x: inner.minX + 150, y: inner.minY + 120),
-                      control2: CGPoint(x: inner.minX + 280, y: inner.minY + 20))
-        near.addLine(to: CGPoint(x: inner.maxX, y: inner.minY)); near.addLine(to: CGPoint(x: inner.minX, y: inner.minY))
-        ctx.addPath(near); ctx.setFillColor(rgb(46, 56, 60)); ctx.fillPath()
-    } else {
-        ctx.setFillColor(rgb(150 * tone, 156 * tone, 164 * tone)); ctx.fill(inner)
-    }
-    ctx.restoreGState()
+// Hand-drawn ASCII landscape: mountains and a sun
+let art = [
+    "            .--.  ",
+    "    /\\     (    ) ",
+    "   /  \\     '--'  ",
+    "  /    \\  /\\      ",
+    " /      \\/  \\     ",
+    "/   /\\   \\   \\    ",
+    "__________________",
+]
+let font = NSFont.monospacedSystemFont(ofSize: 44, weight: .bold)
+let adv: CGFloat = 44 * 0.618, line: CGFloat = 56
+let cols = art.map(\.count).max()!, rows = art.count
+let artW = CGFloat(cols) * adv, artH = CGFloat(rows) * line
+let origin = CGPoint(x: (size - artW) / 2, y: (size - artH) / 2 - 24)
+for (r, s) in art.enumerated() {
+    NSAttributedString(string: s, attributes: [.font: font, .foregroundColor: color(0xd2cbbb)])
+        .draw(at: CGPoint(x: origin.x, y: origin.y + artH - CGFloat(r + 1) * line))
 }
 
-print(center: CGPoint(x: 492, y: 560), angle: 9, tone: 0.78, scene: false)
-print(center: CGPoint(x: 520, y: 536), angle: -6, tone: 0.88, scene: false)
-print(center: CGPoint(x: 512, y: 470), angle: 2, tone: 1, scene: true)
-
-// Pick mark
-let badge = CGRect(x: 640, y: 560, width: 170, height: 170)
-ctx.saveGState()
-ctx.setShadow(offset: CGSize(width: 0, height: -6), blur: 16, color: rgb(0, 0, 0, 0.4))
-ctx.setFillColor(rgb(77, 209, 107)); ctx.fillEllipse(in: badge)
-ctx.restoreGState()
-ctx.setStrokeColor(rgb(16, 30, 18)); ctx.setLineWidth(22); ctx.setLineCap(.round); ctx.setLineJoin(.round)
-ctx.move(to: CGPoint(x: badge.minX + 45, y: badge.midY + 2))
-ctx.addLine(to: CGPoint(x: badge.minX + 75, y: badge.midY - 30))
-ctx.addLine(to: CGPoint(x: badge.maxX - 42, y: badge.midY + 34))
+// Viewfinder corners
+let frame = CGRect(x: origin.x - 60, y: origin.y - 50, width: artW + 120, height: artH + 90)
+ctx.setStrokeColor(color(0x7c766a).cgColor); ctx.setLineWidth(10); ctx.setLineCap(.square)
+let arm: CGFloat = 54
+for (p, dx, dy) in [(CGPoint(x: frame.minX, y: frame.maxY), 1.0, -1.0), (CGPoint(x: frame.maxX, y: frame.maxY), -1.0, -1.0),
+                    (CGPoint(x: frame.minX, y: frame.minY), 1.0, 1.0), (CGPoint(x: frame.maxX, y: frame.minY), -1.0, 1.0)] {
+    ctx.move(to: CGPoint(x: p.x + arm * dx, y: p.y)); ctx.addLine(to: p); ctx.addLine(to: CGPoint(x: p.x, y: p.y + arm * dy))
+}
 ctx.strokePath()
+
+// Brass pick tag, like the app's " ■ PICKED " tag
+let mark = CGRect(x: frame.maxX - 150, y: frame.maxY + 26, width: 150, height: 84)
+ctx.setFillColor(color(0xc2a15e).cgColor); ctx.fill(mark)
+let sq: CGFloat = 34
+ctx.setFillColor(color(0x0d0d0c).cgColor)
+ctx.fill(CGRect(x: mark.midX - sq / 2, y: mark.midY - sq / 2, width: sq, height: sq))
 
 NSGraphicsContext.restoreGraphicsState()
 try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: out))

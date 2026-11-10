@@ -41,7 +41,8 @@ final class ZoomView: NSScrollView {
     }
     required init?(coder: NSCoder) { fatalError() }
 
-    static let canvas = NSColor(white: 0.105, alpha: 1)
+    static let canvas = Theme.nsBG
+    override var mouseDownCanMoveWindow: Bool { false }
 
     func show(_ image: NSImage?, pixelSize: CGSize?, id: String?) {
         let newPhoto = id != photoID

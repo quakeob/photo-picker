@@ -10,9 +10,12 @@ Photo Picker is a small native Mac app for going through a camera card fast. Plu
 
 ## What it does
 
+The look is text-mode: SF Mono, tarnished cream on black, `[KEY]` buttons and box-drawing lines. That's only the chrome. Your photos and thumbnails are always shown as real images.
+
 - **Opens your card by itself.** Insert an SD card or connect your camera and it loads every photo in the order you shot them. You can also open any folder with ⌘O or by dropping it on the window.
 - **RAW + JPEG pairs count as one photo.** Picking `DSCF1141` copies both `DSCF1141.RAF` and `DSCF1141.JPG`, or only one of them if you choose that in Settings.
 - **Filmstrip** of every shot, with picked ones marked. Click a thumbnail to jump to it.
+- **Card map:** one line showing every shot on the card, with `■` for picks and `▲` for where you are. Click it to jump.
 - **Shot details:** shutter speed, aperture, ISO, focal length, camera and date taken.
 - **Zoom to 100%** to check focus: Z, double-click or pinch, then drag to look around.
 - **Eject** the card from the app when you're done (⌘E).

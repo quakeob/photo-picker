@@ -100,12 +100,12 @@ enum Imaging {
         info.lens = exif[kCGImagePropertyExifLensModel] as? String
         var parts: [String] = []
         if let t = (exif[kCGImagePropertyExifExposureTime] as? NSNumber)?.doubleValue, t > 0 {
-            parts.append(t >= 0.5 ? "\(num(t)) s" : "1/\(Int((1 / t).rounded())) s")
+            parts.append(t >= 0.5 ? "\(num(t))s" : "1/\(Int((1 / t).rounded()))s")
         }
-        if let f = (exif[kCGImagePropertyExifFNumber] as? NSNumber)?.doubleValue { parts.append("ƒ/\(num(f))") }
+        if let f = (exif[kCGImagePropertyExifFNumber] as? NSNumber)?.doubleValue { parts.append("f/\(num(f))") }
         if let iso = (exif[kCGImagePropertyExifISOSpeedRatings] as? [NSNumber])?.first { parts.append("ISO \(iso.intValue)") }
-        if let fl = (exif[kCGImagePropertyExifFocalLength] as? NSNumber)?.doubleValue { parts.append("\(num(fl)) mm") }
-        info.exposure = parts.isEmpty ? nil : parts.joined(separator: "   ")
+        if let fl = (exif[kCGImagePropertyExifFocalLength] as? NSNumber)?.doubleValue { parts.append("\(num(fl))mm") }
+        info.exposure = parts.isEmpty ? nil : parts.joined(separator: "  ")
         return info
     }
 

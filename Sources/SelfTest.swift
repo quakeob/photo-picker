@@ -30,17 +30,25 @@ enum SelfTest {
             DispatchQueue.main.asyncAfter(deadline: .now() + t + 2.0) {
                 key(53)()
                 print("esc: \(status())")
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + t + 4.4) {
                 if let w = lib.window { print("window \(w.frame.size) screen \(w.screen?.visibleFrame.size ?? .zero)") }
                 if ProcessInfo.processInfo.environment["PHOTOPICKER_SELFTEST_EJECT"] == "1" {
                     lib.eject()
                     print("eject requested: phase=\(lib.phase)")
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + t + 5.0) {
-                print("final: pending=\(lib.pendingCopies) phase=\(lib.phase) message=\(lib.lastMessage ?? "-") alert=\(lib.alert ?? "-")")
+            let started = Date()
+            func finish() {
+                let ejecting = ProcessInfo.processInfo.environment["PHOTOPICKER_SELFTEST_EJECT"] == "1"
+                if ejecting && lib.lastMessage == nil && lib.alert == nil && Date().timeIntervalSince(started) < t + 30 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: finish); return
+                }
+                print(String(format: "final after %.1fs: ", Date().timeIntervalSince(started)) + "pending=\(lib.pendingCopies) phase=\(lib.phase) message=\(lib.lastMessage ?? "-") alert=\(lib.alert ?? "-")")
                 snap("3-final", out, after: 0)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { NSApp.terminate(nil) }
             }
+            DispatchQueue.main.asyncAfter(deadline: .now() + t + 7.5, execute: finish)
         }
     }
 

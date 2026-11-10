@@ -140,6 +140,7 @@ final class Library: ObservableObject {
         generation += 1
         let gen = generation
         resetContents()
+        lastMessage = nil
         source = root
         let name = title
         phase = .scanning(name)
@@ -214,6 +215,7 @@ final class Library: ObservableObject {
         }
         let name = title
         close()
+        lastMessage = "Ejecting \(name)…"
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 try NSWorkspace.shared.unmountAndEjectDevice(at: vol)
